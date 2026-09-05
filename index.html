@@ -199,6 +199,19 @@ body {
 </head>
 <body>
 
+<!--
+    MUSIC
+    Rename your file to loading.mp3 and put it next to this index.html, or
+    change MUSIC_FILE in the script below.
+
+    An .ogg fallback is listed second. Chromium has supported MP3 for a long
+    time so it should not be needed, but it costs nothing to declare.
+-->
+<audio id="bgm" loop preload="auto">
+    <source src="loading.mp3" type="audio/mpeg">
+    <source src="loading.ogg" type="audio/ogg">
+</audio>
+
 <div id="scanlines"></div>
 <div id="sweep"></div>
 <div id="vignette"></div>
@@ -231,6 +244,66 @@ body {
 
 <script>
 // ES5 only — see the compatibility note at the top of this file.
+
+// ---------------------------------------------------------------------
+// MUSIC
+// ---------------------------------------------------------------------
+// Volume as a fraction of the player's own game volume, which GMod passes
+// to GameDetails. 0.5 means half of whatever they have set -- so someone
+// playing at 20% hears this at 10%, and someone muted hears nothing.
+//
+// Respecting their setting matters more than it looks: this is a server
+// people rejoin repeatedly, and music they cannot turn down gets old fast.
+var MUSIC_VOLUME_SCALE = 0.5;
+
+// Used if GameDetails never fires, so the track is not silent by accident.
+var MUSIC_FALLBACK_VOLUME = 0.3;
+
+var audioEl      = null;
+var audioStarted = false;
+
+function startMusic(gameVolume) {
+    audioEl = audioEl || document.getElementById('bgm');
+    if (!audioEl) { return; }
+
+    var vol = MUSIC_FALLBACK_VOLUME;
+    if (typeof gameVolume === 'number' && !isNaN(gameVolume)) {
+        vol = gameVolume * MUSIC_VOLUME_SCALE;
+    }
+
+    if (vol < 0) { vol = 0; }
+    if (vol > 1) { vol = 1; }
+
+    audioEl.volume = vol;
+
+    // Muted in game: do not start at all.
+    if (vol <= 0) { return; }
+    if (audioStarted) { return; }
+
+    var playing = audioEl.play();
+
+    // Newer builds return a promise that rejects when autoplay is blocked.
+    // Older ones return undefined, hence the guard.
+    if (playing && typeof playing.then === 'function') {
+        playing.then(function () {
+            audioStarted = true;
+        })['catch'](function () {
+            // Blocked. Nothing to do -- the player never interacts with this
+            // page, so there is no click to wait for. The screen still works,
+            // just silently.
+            audioStarted = false;
+        });
+    } else {
+        audioStarted = true;
+    }
+}
+
+// Try immediately as well as from GameDetails, since that callback may fire
+// late or not at all depending on how the client connects.
+if (window.addEventListener) {
+    window.addEventListener('load', function () { startMusic(); }, false);
+}
+
 
 var totalFiles  = 0;
 var neededFiles = 0;
@@ -280,6 +353,10 @@ function GameDetails(servername, serverurl, mapname, maxplayers, steamid, gamemo
     setText('mapname',    mapname    || '---');
     setText('gamemode',   gamemode   || '---');
     setText('maxplayers', (maxplayers || '?') + ' OPERATIVES');
+
+    // GMod passes the player's own volume setting here. Starting the track at
+    // this point means it always respects it.
+    startMusic(volume);
 }
 
 // Total number of files the client may need.
